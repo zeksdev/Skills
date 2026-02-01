@@ -165,40 +165,110 @@ public override Task HandleAsync(MyRequest req, CancellationToken ct)
 }
 ```
 
-## Response Methods
+## Sending Responses
+
+### Option 1: Send Methods
 
 ```csharp
 // Success responses
-await SendAsync(response);           // 200 OK with body
-await SendOkAsync(response);         // Explicit 200
-await SendNoContentAsync();          // 204
-await SendCreatedAtAsync<GetEndpoint>(routeValues, response);
+await SendAsync(response);                    // 200 OK with body
+await SendAsync(response, statusCode);        // Custom status with body
+await SendOkAsync(response);                  // Explicit 200 OK
+await SendOkAsync();                          // 200 OK without body
+await SendNoContentAsync();                   // 204 No Content
+await SendCreatedAtAsync<GetEndpoint>(routeValues, response);  // 201 Created
 
 // Error responses
-await SendNotFoundAsync();           // 404
-await SendUnauthorizedAsync();       // 401
-await SendForbiddenAsync();          // 403
-await SendErrorsAsync();             // 400 with validation errors
+await SendNotFoundAsync();                    // 404 Not Found
+await SendNotFoundAsync(response);            // 404 with body
+await SendUnauthorizedAsync();                // 401 Unauthorized
+await SendForbiddenAsync();                   // 403 Forbidden
+await SendErrorsAsync();                      // 400 with ValidationFailures
+await SendErrorsAsync(statusCode);            // Custom status with errors
 
-// Streaming
+// Redirect
+await SendRedirectAsync(url);                 // Redirect response
+
+// File/Stream responses
 await SendStreamAsync(stream, fileName, contentType);
 await SendFileAsync(fileInfo);
-await SendBytesAsync(bytes, fileName);
+await SendBytesAsync(bytes, fileName, contentType);
 ```
 
-### Union-Type Returns
+### Option 2: Response Property
+
+Assign to `Response` property for automatic 200 OK:
 
 ```csharp
-public class MyEndpoint : Endpoint<MyRequest, Results<Ok<MyResponse>, NotFound>>
+public override async Task HandleAsync(MyRequest req, CancellationToken ct)
 {
-    public override async Task<Results<Ok<MyResponse>, NotFound>> ExecuteAsync(
-        MyRequest req, CancellationToken ct)
+    // Assign properties
+    Response.FullName = req.FirstName + " " + req.LastName;
+    Response.Age = req.Age;
+
+    // Or assign new instance
+    Response = new MyResponse
+    {
+        FullName = "john doe",
+        Age = 30
+    };
+    // Response sent automatically at end of HandleAsync
+}
+```
+
+### Option 3: Conditional Responses with Task<Void>
+
+Change return type to `Task<Void>` to stop execution after sending:
+
+```csharp
+public override async Task<Void> HandleAsync(MyRequest req, CancellationToken ct)
+{
+    if (req.Id == 0)
+        return await SendNotFoundAsync();  // Stops here
+
+    if (!await UserExistsAsync(req.Id))
+        return await SendNotFoundAsync("User not found");
+
+    return await SendOkAsync(new MyResponse { Id = req.Id });
+}
+```
+
+### Option 4: ExecuteAsync with Union Types
+
+Override `ExecuteAsync` instead of `HandleAsync` for typed results:
+
+```csharp
+public class GetUserEndpoint : Endpoint<GetUserRequest, Results<Ok<UserResponse>, NotFound, ProblemDetails>>
+{
+    public override async Task<Results<Ok<UserResponse>, NotFound, ProblemDetails>> ExecuteAsync(
+        GetUserRequest req, CancellationToken ct)
     {
         if (req.Id == 0)
             return TypedResults.NotFound();
 
-        return TypedResults.Ok(new MyResponse { });
+        var user = await _db.GetUserAsync(req.Id);
+        if (user == null)
+            return TypedResults.NotFound();
+
+        return TypedResults.Ok(new UserResponse { Id = user.Id, Name = user.Name });
     }
+}
+```
+
+Common TypedResults: `Ok<T>`, `NotFound`, `BadRequest`, `NoContent`, `Created<T>`, `ProblemDetails`
+
+### ExecuteAsync vs HandleAsync
+
+| Method | Return Type | Use Case |
+|--------|-------------|----------|
+| `HandleAsync` | `Task` or `Task<Void>` | Use Send methods, set Response property |
+| `ExecuteAsync` | `Task<TResponse>` or `Task<Results<...>>` | Return response directly, union types |
+
+```csharp
+// ExecuteAsync returning response directly
+public override Task<UserResponse> ExecuteAsync(GetUserRequest req, CancellationToken ct)
+{
+    return Task.FromResult(new UserResponse { Id = req.Id });
 }
 ```
 

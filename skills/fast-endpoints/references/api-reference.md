@@ -36,7 +36,7 @@ Call in `Configure()` override:
 
 ## Response Methods
 
-Call in `HandleAsync`:
+### Send Methods (in HandleAsync)
 
 | Method | Description |
 |--------|-------------|
@@ -56,15 +56,75 @@ Call in `HandleAsync`:
 | `await SendStreamAsync(stream, fileName, contentType)` | Stream file |
 | `await SendFileAsync(fileInfo)` | Send FileInfo |
 | `await SendBytesAsync(bytes, fileName, contentType)` | Send byte array |
+| `await SendResultAsync(typedResult)` | Send TypedResult in HandleAsync |
 
 ### Response Property
 
-Alternatively, set `Response` property directly:
+Assign to Response property for automatic 200 OK:
 
 ```csharp
+// Assign properties directly
+Response.FullName = req.FirstName + " " + req.LastName;
+Response.Age = req.Age;
+
+// Or assign new instance
 Response = new MyResponse { Id = 1 };
 // Auto-sent at end of HandleAsync
 ```
+
+### Conditional Responses with Task<Void>
+
+Change return type to `Task<Void>` to stop execution after sending:
+
+```csharp
+public override async Task<Void> HandleAsync(MyRequest req, CancellationToken ct)
+{
+    if (req.Id == 0)
+        return await SendNotFoundAsync();  // Execution stops here
+
+    return await SendOkAsync(new MyResponse { Id = req.Id });
+}
+```
+
+### ExecuteAsync vs HandleAsync
+
+| Method | Return Type | Use Case |
+|--------|-------------|----------|
+| `HandleAsync` | `Task` | Use Send methods or set Response property |
+| `HandleAsync` | `Task<Void>` | Conditional responses, early exit |
+| `ExecuteAsync` | `Task<TResponse>` | Return response directly |
+| `ExecuteAsync` | `Task<Results<...>>` | Union types with TypedResults |
+
+### ExecuteAsync with Direct Return
+
+```csharp
+public override Task<UserResponse> ExecuteAsync(GetUserRequest req, CancellationToken ct)
+{
+    return Task.FromResult(new UserResponse { Id = req.Id, Name = "John" });
+}
+```
+
+### ExecuteAsync with Union Types
+
+```csharp
+public override async Task<Results<Ok<UserResponse>, NotFound, ProblemDetails>> ExecuteAsync(
+    GetUserRequest req, CancellationToken ct)
+{
+    if (req.Id == 0)
+        return TypedResults.NotFound();
+
+    var user = await _db.GetUserAsync(req.Id);
+    return TypedResults.Ok(new UserResponse { Id = user.Id });
+}
+```
+
+**Common TypedResults:**
+- `TypedResults.Ok<T>(value)` - 200 OK
+- `TypedResults.NotFound()` - 404
+- `TypedResults.BadRequest()` - 400
+- `TypedResults.NoContent()` - 204
+- `TypedResults.Created<T>(uri, value)` - 201
+- `TypedResults.Problem()` - ProblemDetails
 
 ## Binding Attributes
 
